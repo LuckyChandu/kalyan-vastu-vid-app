@@ -1,0 +1,736 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kalyan Vastu Vid - Civil Engineering Management</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/babel-standalone@7.22.9/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    const { jsPDF } = window.jspdf;
+
+    // Mock backend data
+    const mockSORData = [
+      { id: 1, item: "PCC 1:2:4", unit: "cu.m", rate: 4500, state: "MP", dept: "PWD", updated: "2025-01-01" },
+      { id: 2, item: "Manhole Construction", unit: "nos", rate: 12000, state: "UP", dept: "NHAI", updated: "2025-02-01" },
+      { id: 3, item: "Bituminous Macadam", unit: "sq.m", rate: 300, state: "MP", dept: "PWD", updated: "2025-03-01" },
+    ];
+
+    const mockTestData = [
+      { id: 1, project: "Highway NH-45", type: "Road", test: "Slump Test", date: "2025-05-01", result: "75 mm", remarks: "Passed" },
+      { id: 2, project: "Bhopal Dam", type: "Dam", test: "MDD Test", date: "2025-05-02", result: "1.95 g/cc", remarks: "Optimal" },
+    ];
+
+    const mockInventoryData = [
+      { id: 1, material: "Cement", unit: "bags", quantity: 500, location: "Site A" },
+      { id: 2, material: "Steel", unit: "tons", quantity: 10, location: "Site B" },
+    ];
+
+    // Main App Component
+    function App() {
+      const [user, setUser] = useState(null);
+      const [email, setEmail] = useState("");
+      const [password, setPassword] = useState("");
+      const [activeTab, setActiveTab] = useState("dashboard");
+      const [sorData, setSorData] = useState(mockSORData);
+      const [estimates, setEstimates] = useState([]);
+      const [testData, setTestData] = useState(mockTestData);
+      const [inventoryData, setInventoryData] = useState(mockInventoryData);
+      const [searchQuery, setSearchQuery] = useState("");
+      const [selectedSOR, setSelectedSOR] = useState(null);
+      const [inputFields, setInputFields] = useState({});
+      const [language, setLanguage] = useState("en");
+      const chartRef = useRef(null);
+
+      // Bilingual labels
+      const labels = {
+        en: {
+          login: "Login",
+          dashboard: "Dashboard",
+          estimation: "Estimation",
+          tests: "Test Reports",
+          inventory: "Inventory",
+          quality: "Quality Control",
+          logout: "Logout",
+          search: "Search by item or ID",
+          addEstimate: "Add to Estimate",
+          addTest: "Add Test",
+          addInventory: "Add Inventory",
+        },
+        hi: {
+          login: "लॉगिन",
+          dashboard: "डैशबोर्ड",
+          estimation: "प्राक्कलन",
+          tests: "परीक्षण रिपोर्ट",
+          inventory: "इन्वेंट्री",
+          quality: "गुणवत्ता नियंत्रण",
+          logout: "लॉगआउट",
+          search: "आइटम या आईडी द्वारा खोजें",
+          addEstimate: "प्राक्कलन में जोड़ें",
+          addTest: "परीक्षण जोड़ें",
+          addInventory: "इन्वेंट्री जोड़ें",
+        },
+      };
+
+      // Mock login
+      const handleLogin = (e) => {
+        e.preventDefault();
+        if (email && password) {
+          setUser({ email, role: "admin" });
+        } else {
+          alert("Please enter email and password");
+        }
+      };
+
+      // Initialize chart
+      useEffect(() => {
+        if (activeTab === "dashboard" && chartRef.current) {
+          const ctx = chartRef.current.getContext("2d");
+          new Chart(ctx, {
+            type: "bar",
+            data: {
+              labels: ["Jan", "Feb", "Mar", "Apr", "May"],
+              datasets: [
+                {
+                  label: "Project Progress (%)",
+                  data: [20, 40, 60, 80, 100],
+                  backgroundColor: "#2563EB",
+                },
+              ],
+            },
+            options: { scales: { y: { beginAtZero: true } } },
+          });
+        }
+      }, [activeTab]);
+
+      // Handle SOR search
+      const filteredSOR = sorData.filter(
+        (item) =>
+          item.item.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          item.id.toString().includes(searchQuery)
+      );
+
+      // Handle SOR selection
+      const handleSelectSOR = (item) => {
+        setSelectedSOR(item);
+        setInputFields({});
+        if (item.unit === "cu.m") {
+          setInputFields({ length: "", breadth: "", height: "" });
+        } else if (item.unit === "sq.m") {
+          setInputFields({ length: "", breadth: "" });
+        } else if (item.unit === "nos") {
+          setInputFields({ count: "" });
+        }
+      };
+
+      // Calculate estimate
+      const handleAddEstimate = (e) => {
+        e.preventDefault();
+        let quantity = 0;
+        if (selectedSOR.unit === "cu.m") {
+          quantity =
+            parseFloat(inputFields.length) *
+            parseFloat(inputFields.breadth) *
+            parseFloat(inputFields.height);
+        } else if (selectedSOR.unit === "sq.m") {
+          quantity = parseFloat(inputFields.length) * parseFloat(inputFields.breadth);
+        } else if (selectedSOR.unit === "nos") {
+          quantity = parseFloat(inputFields.count);
+        }
+        const cost = quantity * selectedSOR.rate;
+        const newEstimate = {
+          id: estimates.length + 1,
+          item: selectedSOR.item,
+          unit: selectedSOR.unit,
+          quantity,
+          rate: selectedSOR.rate,
+          cost,
+        };
+        setEstimates([...estimates, newEstimate]);
+        setSelectedSOR(null);
+        setInputFields({});
+      };
+
+      // Export estimates as PDF
+      const exportEstimates = () => {
+        const doc = new jsPDF();
+        doc.setFontSize(16);
+        doc.text("Kalyan Vastu Vid - Estimate Report", 20, 20);
+        doc.setFontSize(12);
+        let y = 40;
+        estimates.forEach((est) => {
+          doc.text(
+            `Item: ${est.item}, Unit: ${est.unit}, Qty: ${est.quantity.toFixed(2)}, Rate: ₹${est.rate}, Cost: ₹${est.cost.toFixed(2)}`,
+            20,
+            y
+          );
+          y += 10;
+        });
+        doc.save("Estimate_Report.pdf");
+      };
+
+      // Add test data
+      const handleAddTest = (e) => {
+        e.preventDefault();
+        const newTest = {
+          id: testData.length + 1,
+          project: e.target.project.value,
+          type: e.target.type.value,
+          test: e.target.test.value,
+          date: e.target.date.value,
+          result: e.target.result.value,
+          remarks: e.target.remarks.value,
+        };
+        setTestData([...testData, newTest]);
+        e.target.reset();
+      };
+
+      // Download test report as PDF
+      const downloadTestReport = (test) => {
+        const doc = new jsPDF();
+        doc.setFontSize(16);
+        doc.text("Kalyan Vastu Vid - Test Report", 20, 20);
+        doc.setFontSize(12);
+        doc.text(`Project: ${test.project}`, 20, 40);
+        doc.text(`Type: ${test.type}`, 20, 50);
+        doc.text(`Test: ${test.test}`, 20, 60);
+        doc.text(`Date: ${test.date}`, 20, 70);
+        doc.text(`Result: ${test.result}`, 20, 80);
+        doc.text(`Remarks: ${test.remarks}`, 20, 90);
+        doc.save(`Test_Report_${test.id}.pdf`);
+      };
+
+      // Add inventory data
+      const handleAddInventory = (e) => {
+        e.preventDefault();
+        const newItem = {
+          id: inventoryData.length + 1,
+          material: e.target.material.value,
+          unit: e.target.unit.value,
+          quantity: parseFloat(e.target.quantity.value),
+          location: e.target.location.value,
+        };
+        setInventoryData([...inventoryData, newItem]);
+        e.target.reset();
+      };
+
+      // Logout
+      const handleLogout = () => {
+        setUser(null);
+        setEmail("");
+        setPassword("");
+        setActiveTab("dashboard");
+      };
+
+      if (!user) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-200">
+            <div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
+              <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">Kalyan Vastu Vid</h1>
+              <form onSubmit={handleLogin}>
+                <div className="mb-4">
+                  <label className="block text-gray-700">{labels[language].login}</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <div className="mb-6">
+                  <label className="block text-gray-700">Password</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition duration-200"
+                >
+                  {labels[language].login}
+                </button>
+              </form>
+              <div className="mt-4 text-center">
+                <button
+                  onClick={() => setLanguage(language === "en" ? "hi" : "en")}
+                  className="text-blue-600 hover:underline"
+                >
+                  {language === "en" ? "हिंदी" : "English"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen bg-gray-100 flex">
+          <div className="w-64 bg-gray-200 p-4">
+            <h2 className="text-xl font-bold mb-4">Menu</h2>
+            <button
+              onClick={() => setActiveTab("dashboard")}
+              className="w-full text-left py-2 px-4 mb-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              {labels[language].dashboard}
+            </button>
+            <button
+              onClick={() => setActiveTab("estimation")}
+              className="w-full text-left py-2 px-4 mb-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              {labels[language].estimation}
+            </button>
+            <button
+              onClick={() => setActiveTab("tests")}
+              className="w-full text-left py-2 px-4 mb-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              {labels[language].tests}
+            </button>
+            <button
+              onClick={() => setActiveTab("inventory")}
+              className="w-full text-left py-2 px-4 mb-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              {labels[language].inventory}
+            </button>
+            <button
+              onClick={() => setActiveTab("quality")}
+              className="w-full text-left py-2 px-4 mb-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              {labels[language].quality}
+            </button>
+            <button
+              onClick={handleLogout}
+              className="w-full text-left py-2 px-4 bg-red-600 text-white rounded-lg hover:bg-red-700"
+            >
+              {labels[language].logout}
+            </button>
+            <div className="mt-4">
+              <button
+                onClick={() => setLanguage(language === "en" ? "hi" : "en")}
+                className="text-blue-600 hover:underline"
+              >
+                {language === "en" ? "हिंदी" : "English"}
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 p-6">
+            {activeTab === "dashboard" && (
+              <div>
+                <h2 className="text-2xl font-bold mb-4 text-gray-800">{labels[language].dashboard}</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-white p-4 rounded-lg shadow">
+                    <h3 className="font-semibold text-gray-700">Active Projects</h3>
+                    <p className="text-3xl text-blue-600">5</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-lg shadow">
+                    <h3 className="font-semibold text-gray-700">Inventory Status</h3>
+                    <p className="text-3xl text-blue-600">80%</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-lg shadow">
+                    <h3 className="font-semibold text-gray-700">Pending Bills</h3>
+                    <p className="text-3xl text-blue-600">₹2,50,000</p>
+                  </div>
+                </div>
+                <div className="mt-6 bg-white p-4 rounded-lg shadow">
+                  <h3 className="font-semibold text-gray-700 mb-2">Project Progress</h3>
+                  <canvas ref={chartRef}></canvas>
+                </div>
+              </div>
+            )}
+            {activeTab === "estimation" && (
+              <div>
+                <h2 className="text-2xl font-bold mb-4 text-gray-800">{labels[language].estimation}</h2>
+                <div className="mb-6">
+                  <h3 className="font-semibold mb-2 text-gray-700">{labels[language].search}</h3>
+                  <input
+                    type="text"
+                    placeholder={labels[language].search}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div className="mt-4 max-h-64 overflow-y-auto">
+                    <table className="w-full bg-white rounded-lg shadow">
+                      <thead>
+                        <tr className="bg-gray-200">
+                          <th className="p-2 text-left">ID</th>
+                          <th className="p-2 text-left">Item</th>
+                          <th className="p-2 text-left">Unit</th>
+                          <th className="p-2 text-left">Rate</th>
+                          <th className="p-2 text-left">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredSOR.map((item) => (
+                          <tr key={item.id} className="border-t">
+                            <td className="p-2">{item.id}</td>
+                            <td className="p-2">{item.item}</td>
+                            <td className="p-2">{item.unit}</td>
+                            <td className="p-2">₹{item.rate}</td>
+                            <td className="p-2">
+                              <button
+                                onClick={() => handleSelectSOR(item)}
+                                className="bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700"
+                              >
+                                Select
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                {selectedSOR && (
+                  <div className="mb-6">
+                    <h3 className="font-semibold mb-2 text-gray-700">{labels[language].addEstimate}</h3>
+                    <form onSubmit={handleAddEstimate}>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {selectedSOR.unit === "cu.m" && (
+                          <>
+                            <input
+                              type="number"
+                              placeholder="Length (m)"
+                              value={inputFields.length || ""}
+                              onChange={(e) =>
+                                setInputFields({ ...inputFields, length: e.target.value })
+                              }
+                              className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              required
+                            />
+                            <input
+                              type="number"
+                              placeholder="Breadth (m)"
+                              value={inputFields.breadth || ""}
+                              onChange={(e) =>
+                                setInputFields({ ...inputFields, breadth: e.target.value })
+                              }
+                              className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              required
+                            />
+                            <input
+                              type="number"
+                              placeholder="Height (m)"
+                              value={inputFields.height || ""}
+                              onChange={(e) =>
+                                setInputFields({ ...inputFields, height: e.target.value })
+                              }
+                              className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              required
+                            />
+                          </>
+                        )}
+                        {selectedSOR.unit === "sq.m" && (
+                          <>
+                            <input
+                              type="number"
+                              placeholder="Length (m)"
+                              value={inputFields.length || ""}
+                              onChange={(e) =>
+                                setInputFields({ ...inputFields, length: e.target.value })
+                              }
+                              className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              required
+                            />
+                            <input
+                              type="number"
+                              placeholder="Breadth (m)"
+                              value={inputFields.breadth || ""}
+                              onChange={(e) =>
+                                setInputFields({ ...inputFields, breadth: e.target.value })
+                              }
+                              className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              required
+                            />
+                          </>
+                        )}
+                        {selectedSOR.unit === "nos" && (
+                          <input
+                            type="number"
+                            placeholder="Count"
+                            value={inputFields.count || ""}
+                            onChange={(e) =>
+                              setInputFields({ ...inputFields, count: e.target.value })
+                            }
+                            className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            required
+                          />
+                        )}
+                      </div>
+                      <button
+                        type="submit"
+                        className="mt-4 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200"
+                      >
+                        {labels[language].addEstimate}
+                      </button>
+                    </form>
+                  </div>
+                )}
+                <h3 className="font-semibold mb-2 text-gray-700">Estimates</h3>
+                <button
+                  onClick={exportEstimates}
+                  className="mb-4 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700"
+                >
+                  Export as PDF
+                </button>
+                <table className="w-full bg-white rounded-lg shadow">
+                  <thead>
+                    <tr className="bg-gray-200">
+                      <th className="p-2 text-left">Item</th>
+                      <th className="p-2 text-left">Unit</th>
+                      <th className="p-2 text-left">Quantity</th>
+                      <th className="p-2 text-left">Rate</th>
+                      <th className="p-2 text-left">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {estimates.map((est) => (
+                      <tr key={est.id} className="border-t">
+                        <td className="p-2">{est.item}</td>
+                        <td className="p-2">{est.unit}</td>
+                        <td className="p-2">{est.quantity.toFixed(2)}</td>
+                        <td className="p-2">₹{est.rate}</td>
+                        <td className="p-2">₹{est.cost.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {activeTab === "tests" && (
+              <div>
+                <h2 className="text-2xl font-bold mb-4 text-gray-800">{labels[language].tests}</h2>
+                <div className="mb-6">
+                  <h3 className="font-semibold mb-2 text-gray-700">{labels[language].addTest}</h3>
+                  <form onSubmit={handleAddTest}>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <input
+                        type="text"
+                        name="project"
+                        placeholder="Project Name"
+                        className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                      <select
+                        name="type"
+                        className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      >
+                        <option value="">Select Project Type</option>
+                        <option value="Building">Building</option>
+                        <option value="Road">Road</option>
+                        <option value="Dam">Dam</option>
+                        <option value="Bridge">Bridge</option>
+                        <option value="Tunnel">Tunnel</option>
+                        <option value="Railway">Railway</option>
+                        <option value="Airport">Airport</option>
+                      </select>
+                      <input
+                        type="text"
+                        name="test"
+                        placeholder="Test Name (e.g., Slump Test)"
+                        className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                      <input
+                        type="date"
+                        name="date"
+                        className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                      <input
+                        type="text"
+                        name="result"
+                        placeholder="Result (e.g., 75 mm)"
+                        className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                      <input
+                        type="text"
+                        name="remarks"
+                        placeholder="Remarks"
+                        className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="mt-4 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200"
+                    >
+                      {labels[language].addTest}
+                    </button>
+                  </form>
+                </div>
+                <h3 className="font-semibold mb-2 text-gray-700">Test Reports</h3>
+                <table className="w-full bg-white rounded-lg shadow">
+                  <thead>
+                    <tr className="bg-gray-200">
+                      <th className="p-2 text-left">Project</th>
+                      <th className="p-2 text-left">Type</th>
+                      <th className="p-2 text-left">Test</th>
+                      <th className="p-2 text-left">Date</th>
+                      <th className="p-2 text-left">Result</th>
+                      <th className="p-2 text-left">Remarks</th>
+                      <th className="p-2 text-left">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {testData.map((test) => (
+                      <tr key={test.id} className="border-t">
+                        <td className="p-2">{test.project}</td>
+                        <td className="p-2">{test.type}</td>
+                        <td className="p-2">{test.test}</td>
+                        <td className="p-2">{test.date}</td>
+                        <td className="p-2">{test.result}</td>
+                        <td className="p-2">{test.remarks}</td>
+                        <td className="p-2">
+                          <button
+                            onClick={() => downloadTestReport(test)}
+                            className="bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700"
+                          >
+                            Download PDF
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {activeTab === "inventory" && (
+              <div>
+                <h2 className="text-2xl font-bold mb-4 text-gray-800">{labels[language].inventory}</h2>
+                <div className="mb-6">
+                  <h3 className="font-semibold mb-2 text-gray-700">{labels[language].addInventory}</h3>
+                  <form onSubmit={handleAddInventory}>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <input
+                        type="text"
+                        name="material"
+                        placeholder="Material (e.g., Cement)"
+                        className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                      <input
+                        type="text"
+                        name="unit"
+                        placeholder="Unit (e.g., bags)"
+                        className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                      <input
+                        type="number"
+                        name="quantity"
+                        placeholder="Quantity"
+                        className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                      <input
+                        type="text"
+                        name="location"
+                        placeholder="Location (e.g., Site A)"
+                        className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="mt-4 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200"
+                    >
+                      {labels[language].addInventory}
+                    </button>
+                  </form>
+                </div>
+                <h3 className="font-semibold mb-2 text-gray-700">Inventory</h3>
+                <table className="w-full bg-white rounded-lg shadow">
+                  <thead>
+                    <tr className="bg-gray-200">
+                      <th className="p-2 text-left">Material</th>
+                      <th className="p-2 text-left">Unit</th>
+                      <th className="p-2 text-left">Quantity</th>
+                      <th className="p-2 text-left">Location</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inventoryData.map((item) => (
+                      <tr key={item.id} className="border-t">
+                        <td className="p-2">{item.material}</td>
+                        <td className="p-2">{item.unit}</td>
+                        <td className="p-2">{item.quantity}</td>
+                        <td className="p-2">{item.location}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {activeTab === "quality" && (
+              <div>
+                <h2 className="text-2xl font-bold mb-4 text-gray-800">{labels[language].quality}</h2>
+                <div className="bg-white p-4 rounded-lg shadow">
+                  <h3 className="font-semibold text-gray-700 mb-2">Quality Control Overview</h3>
+                  <p>Track material quality, test compliance, and certifications (Coming Soon).</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Render the app
+    ReactDOM.render(<App />, document.getElementById("root"));
+  </script>
+</body>
+</html>
